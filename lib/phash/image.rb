@@ -17,6 +17,34 @@ module Phash
   #
   attach_function :ph_hamming_distance, [:uint64, :uint64], :int, :blocking => true
 
+  class Digest < FFI::Struct
+    layout id: :string,
+      coeffs: :pointer,
+      size: :int
+
+    def coeffs
+      self[:coeffs].read_array_of_type(:uint8, :read_uint8, self[:size])
+    end
+
+    def self.from_coeffs(coeffs)
+      digest = new
+      digest[:coeffs] = FFI::MemoryPointer.new(:uint8, coeffs.size)
+      digest[:coeffs].put_array_of_uint8(0, coeffs)
+      digest[:size] = coeffs.size
+      digest
+    end
+
+    def free
+      self[:coeffs].free if self[:coeffs]
+      self[:id].free if self[:id]
+    end
+
+  end
+
+  attach_function :ph_image_digest, [:string, :double, :double, Digest.by_ref, :int], :int, blocking: true
+
+  attach_function :ph_crosscorr, [Digest.by_ref, Digest.by_ref, :pointer], :int, blocking: true
+
   class << self
     # Get image file hash using <tt>ph_dct_imagehash</tt>
     def image_hash(path)
@@ -26,6 +54,28 @@ module Phash
         hash_p.free
 
         ImageHash.new(hash)
+      end
+    end
+
+    def image_radial_hash(path)
+      digest = Digest.new
+      if -1 != ph_image_digest(path.to_s, 1.0, 1.0, digest, 180)
+        arr = digest.coeffs
+        digest.free
+        arr
+      end
+    end
+
+    def image_crosscor(hash_a, hash_b)
+      pcc = FFI::MemoryPointer.new :double
+      d1 = Digest.from_coeffs(hash_a)
+      d2 = Digest.from_coeffs(hash_b)
+      if -1 != ph_crosscorr(d1, d2, pcc)
+        cor = pcc.get_float64(0)
+        pcc.free
+        d1.free
+        d2.free
+        cor
       end
     end
 
